@@ -1,36 +1,42 @@
-# ================= INSTALL =================
-# Run separately in notebook
-# %pip install numpy matplotlib ibm-watsonx-ai
+# ================= INSTALL (run once if needed) =================
+# %pip install numpy==2.3.4 matplotlib==3.10.7 ibm-watsonx-ai==1.4.7
 
 # ================= IMPORTS =================
 import numpy as np
 import matplotlib.pyplot as plt
 import json
 import os
+import warnings
+warnings.filterwarnings('ignore')
 
 from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import ModelInference
 from ibm_watsonx_ai.metanames import GenTextParamsMetaNames as GenParams
-from ibm_watsonx_ai.foundation_models.utils.enums import (
-    DecodingMethods,
-)
+from ibm_watsonx_ai.foundation_models.utils.enums import DecodingMethods
 
-# ================= LOAD DATA =================
+# ================= DOWNLOAD DATA =================
+import urllib.request
+
+url = "https://cf-courses-data.s3.us.cloud-object-storage.appdomain.cloud/1r_mM6ZPYNxcFv65QkzubA/California-Culinary-Map.txt"
 file_path = "California-Culinary-Map.txt"
 
+if not os.path.exists(file_path):
+    urllib.request.urlretrieve(url, file_path)
+
+# ================= LOAD DATA =================
 with open(file_path, "r", encoding="utf-8") as f:
     data = f.read()
 
-print(data[:100])
+print("Preview:", data[:100])
 
 # ================= SPLIT =================
 restaurant_list = data.split("\n\n")
 restaurant_list = restaurant_list[1:]
 
 print("Total restaurants:", len(restaurant_list))
-print("First item:\n", restaurant_list[0])
+print("Sample:\n", restaurant_list[0])
 
-# ================= LLM =================
+# ================= LLM FUNCTION =================
 def llm_model(system_msg, prompt_txt):
 
     credentials = Credentials(
@@ -87,7 +93,8 @@ Fields:
 name, location, type, food_style, rating, price_range, signatures, vibe, environment, shortcomings
 
 Rules:
-- price_range = count of $
+- rating must be float
+- price_range = number of $
 - signatures must be list
 - shortcomings must be list
 
@@ -95,8 +102,7 @@ Restaurant:
 {restaurant_paragraph}
 
 Example:
-{EXAMPLE_RESTAURANT_PARAGRAPH}
-
+Input: {EXAMPLE_RESTAURANT_PARAGRAPH}
 Output:
 {EXAMPLE_OUTPUT}
 """
@@ -122,7 +128,7 @@ class Restaurant(BaseModel):
 # ================= JSON REPAIR =================
 def JSON_auto_repair_prompts(candidate_json_output, error_message):
 
-    sys_msg = "Fix JSON strictly."
+    system_msg = "Fix JSON strictly."
 
     prompt = f"""
 Invalid JSON:
@@ -134,7 +140,7 @@ Error:
 Return ONLY valid JSON.
 """
 
-    return sys_msg, prompt
+    return system_msg, prompt
 
 # ================= MAIN LOOP =================
 structured_restaurant_lists = []
@@ -149,20 +155,21 @@ for i, restaurant_paragraph in enumerate(restaurant_list):
             Restaurant.model_validate_json(response)
             break
         except ValidationError as e:
-            sys_msg, repair_prompt = JSON_auto_repair_prompts(response, e)
-            response = llm_model(sys_msg, repair_prompt)
+            repair_sys, repair_prompt = JSON_auto_repair_prompts(response, e)
+            response = llm_model(repair_sys, repair_prompt)
 
     structured_restaurant_lists.append(response)
 
     if (i+1) % 20 == 0:
-        print(f"{i+1} done")
+        print(f"{i+1} / {len(restaurant_list)} done")
 
-print("ALL DONE")
+print("ALL DONE!!")
 
 # ================= SCREENSHOT STEP =================
+print("\n50th item:\n")
 print(structured_restaurant_lists[49])
 
-# ================= SAVE =================
+# ================= SAVE JSON =================
 structured_restaurant_lists_json = []
 
 for response in structured_restaurant_lists:
@@ -172,9 +179,9 @@ for response in structured_restaurant_lists:
         structured_restaurant_lists_json.append({})
 
 for i, response in enumerate(structured_restaurant_lists_json):
-    response["itemId"] = 1000001 + i
+    response['itemId'] = 1000001 + i
 
-with open("structured_restaurant_data.json", "w") as f:
+with open("structured_restaurant_data.json", "w", encoding="utf-8") as f:
     json.dump(structured_restaurant_lists_json, f, indent=4)
 
-print("Saved successfully")
+print("✅ File saved: structured_restaurant_data.json")
